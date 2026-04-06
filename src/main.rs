@@ -6,6 +6,32 @@ struct TextMessage<'a> {
     instance: Instance,
 }
 
+struct Browser<'a> {
+    jvm: &'a Jvm,
+    instance: Instance,
+}
+
+impl<'a> Browser<'a> {
+    fn new(jvm: &'a Jvm, instance: Instance) -> Self {
+        Self { jvm, instance }
+    }
+
+    fn get_enumeration(&self) -> Result<Vec<Message<'a>>> {
+        let enumeration = self.jvm.invoke(&self.instance, "getEnumeration", InvocationArg::empty())?;
+        let mut vec = Vec::new();
+        while self.jvm.to_rust(self.jvm.invoke(&enumeration, "hasMoreElements", InvocationArg::empty())?)? {
+            let elem = self.jvm.invoke(&enumeration, "nextElement", InvocationArg::empty())?;
+            let is_null = self.jvm.check_equals(&elem, InvocationArg::try_from(Null::Boolean)?)?;
+            if is_null {
+                return Ok(vec);
+            } else {
+                vec.push(Message::new(self.jvm, elem)?);
+            }
+        }
+        Ok(vec)
+    }
+}
+
 impl<'a> TextMessage<'a> {
 
     fn new(jvm: &'a Jvm, instance: Instance) -> Self {
@@ -158,6 +184,15 @@ impl<'a> Session<'a> {
         Ok(Queue::new(queue))
     }
 
+    fn create_browser(&self, queue: Queue) -> Result<Browser<'a>> {
+        let browser = self.jvm.invoke(
+            &self.instance,
+            "createBrowser",
+            &[InvocationArg::from(queue.instance)],
+        )?;
+        Ok(Browser::new(self.jvm, browser))
+    }
+
     fn create_producer(&'_ self, queue: Queue) -> Result<Producer<'_>> {
         let producer = self.jvm.invoke(
             &self.instance,
@@ -304,6 +339,14 @@ fn main() -> Result<()> {
     let producer = session.create_producer(queue)?;
 
     producer.send(Message::TextMessage(message))?;
+
+    let queue = session.create_queue("TEST::TEST_ANYCAST")?;
+
+    let browser = session.create_browser(queue)?;
+
+    for msg in browser.get_enumeration()? {
+        println!("{:?}", msg.get_jms_message_id())
+    };
 
     let queue = session.create_queue("TEST_ANYCAST")?;
 
