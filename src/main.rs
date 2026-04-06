@@ -22,6 +22,16 @@ impl<'a> TextMessage<'a> {
         Ok(text)
     }
 
+    fn get_jms_message_id(&self) -> Result<String> {
+        let id_instance = self.jvm.invoke(
+            &self.instance,
+            "getJMSMessageID",
+            InvocationArg::empty(),
+        )?;
+        let id: String = self.jvm.to_rust(id_instance)?;
+        Ok(id)
+    }
+
 }
 
 enum Message<'a> {
@@ -44,6 +54,12 @@ impl<'a> Message<'a> {
             Err(J4RsError::GeneralError(String::from("This Message Type is currently not supported.")))
         }
 
+    }
+
+    fn get_jms_message_id(&self) -> Result<String> {
+        match self {
+            Message::TextMessage(text) => text.get_jms_message_id()
+        }
     }
 
 }
@@ -278,6 +294,7 @@ fn main() -> Result<()> {
     let message = consumer.receive_no_wait()?;
 
     if let Some(msg) = message {
+        println!("Message-Id: {:?}", msg.get_jms_message_id()?);
         let text = match msg {
             Message::TextMessage(message) => {message.get_text()}
         }?;
@@ -285,15 +302,6 @@ fn main() -> Result<()> {
     } else {
         println!("No Message Found");
     }
-
-    //let id = jvm.invoke(
-    //    &message,
-    //    "getJMSMessageID",
-    //    InvocationArg::empty(),
-    //)?;
-
-    //let id: String = jvm.to_rust(id)?;
-    //println!("{}", id);
 
     session.close()?;
     connection.close()?;
