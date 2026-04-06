@@ -3,8 +3,10 @@ use j4rs::{InvocationArg, JvmBuilder, MavenArtifact, errors::Result, Null};
 fn main() -> Result<()> {
     let jvm = JvmBuilder::new().build()?;
 
+    println!("Loading the jms driver. This may take some time.");
     let dbx_artifact = MavenArtifact::from("org.apache.artemis:artemis-jakarta-client:2.53.0");
     jvm.deploy_artifact_and_deps(&dbx_artifact)?;
+    println!("Loaded the jms driver");
 
     let connection_factory = jvm.create_instance(
         "org.apache.activemq.artemis.jms.client.ActiveMQConnectionFactory",
