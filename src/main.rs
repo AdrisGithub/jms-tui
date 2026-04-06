@@ -1,4 +1,60 @@
-use j4rs::{InvocationArg, JvmBuilder, MavenArtifact, errors::Result, Null, Jvm, Instance};
+use j4rs::{InvocationArg, JvmBuilder, MavenArtifact, errors::Result, Jvm, Instance, Null};
+use j4rs::errors::J4RsError;
+
+struct TextMessage<'a> {
+    jvm: &'a Jvm,
+    instance: Instance,
+}
+
+impl<'a> TextMessage<'a> {
+
+    fn new(jvm: &'a Jvm, instance: Instance) -> Self {
+        Self { jvm, instance }
+    }
+
+    fn get_text(&self) -> Result<String> {
+        let text_instance = self.jvm.invoke(
+            &self.instance,
+            "getText",
+            InvocationArg::empty(),
+        )?;
+        let text: String = self.jvm.to_rust(text_instance)?;
+        Ok(text)
+    }
+
+}
+
+enum Message<'a> {
+    TextMessage(TextMessage<'a>),
+}
+
+impl<'a> Message<'a> {
+    fn new(jvm: &'a Jvm, instance: Instance) -> Result<Self> {
+        let class: String = jvm
+            .chain(&instance)?
+            .cast("java.lang.Object")?
+            .invoke("getClass", InvocationArg::empty())?
+            .invoke("getName", InvocationArg::empty())?
+            .to_rust()?;
+
+        if class.contains("TextMessage") {
+            let text_instance = jvm.cast(&instance, "jakarta.jms.TextMessage")?;
+            Ok(Self::TextMessage(TextMessage::new(jvm, text_instance)))
+        } else {
+            Err(J4RsError::GeneralError(String::from("This Message Type is currently not supported.")))
+        }
+
+    }
+
+}
+impl From<Message<'_>> for InvocationArg {
+    fn from(value: Message<'_>) -> Self {
+        let instance = match value {
+            Message::TextMessage(text) => text.instance
+        };
+        InvocationArg::from(instance)
+    }
+}
 
 struct Queue {
     instance: Instance,
@@ -22,13 +78,18 @@ impl<'a> Consumer<'a> {
         Consumer { jvm, instance }
     }
 
-    fn receive_no_wait(&self) -> Result<Instance> {
+    fn receive_no_wait(&'_ self) -> Result<Option<Message<'_>>> {
         let message = self.jvm.invoke(
             &self.instance,
             "receiveNoWait",
             InvocationArg::empty(),
         )?;
-        Ok(message)
+        let is_null = self.jvm.check_equals(&message, InvocationArg::try_from(Null::Boolean)?)?;
+        if is_null {
+            Ok(None)
+        } else {
+            Ok(Some(Message::new(self.jvm, message)?))
+        }
     }
 }
 
@@ -42,7 +103,7 @@ impl<'a> Producer<'a> {
         Self { jvm, instance }
     }
 
-    fn send(&self, message: Instance) -> Result<()> {
+    fn send(&self, message: Message) -> Result<()> {
         self.jvm.invoke(
             &self.instance,
             "send",
@@ -63,13 +124,13 @@ impl<'a> Session<'a> {
         Self { jvm, instance }
     }
 
-    fn create_text_message(&self, text: &str) -> Result<Instance> {
+    fn create_text_message(&self, text: &str) -> Result<TextMessage<'a>> {
         let message = self.jvm.invoke(
             &self.instance,
             "createTextMessage",
             &[InvocationArg::try_from(text)?],
         )?;
-        Ok(message)
+        Ok(TextMessage::new(self.jvm, message))
     }
 
     fn create_queue(&self, name: &str) -> Result<Queue> {
@@ -208,7 +269,7 @@ fn main() -> Result<()> {
 
     let producer = session.create_producer(queue)?;
 
-    producer.send(message)?;
+    producer.send(Message::TextMessage(message))?;
 
     let queue = session.create_queue("TEST_ANYCAST")?;
 
@@ -216,43 +277,23 @@ fn main() -> Result<()> {
 
     let message = consumer.receive_no_wait()?;
 
-    let is_null = jvm.check_equals(&message, InvocationArg::try_from(Null::Boolean)?)?;
-
-    if is_null {
-        println!("No Message Found");
+    if let Some(msg) = message {
+        let text = match msg {
+            Message::TextMessage(message) => {message.get_text()}
+        }?;
+        println!("Message: {:?}", text);
     } else {
-        let id = jvm.invoke(
-            &message,               
-            "getJMSMessageID",      
-            InvocationArg::empty(), 
-        )?;
-
-        let id: String = jvm.to_rust(id)?;
-        println!("{}", id);
-
-        let class_name: String = jvm
-            .chain(&message)?
-            .cast("java.lang.Object")?
-            .invoke("getClass", InvocationArg::empty())?
-            .invoke("getName", InvocationArg::empty())?
-            .to_rust()?;
-
-        println!("{}", class_name);
-
-        if class_name.contains("TextMessage") {
-            let textmessage = jvm.cast(&message, "jakarta.jms.TextMessage")?;
-
-            let text = jvm.invoke(
-                &textmessage,               
-                "getText",      
-                InvocationArg::empty(), 
-            )?;
-
-            let text: String = jvm.to_rust(text)?;
-
-            println!("{}", text);
-        }
+        println!("No Message Found");
     }
+
+    //let id = jvm.invoke(
+    //    &message,
+    //    "getJMSMessageID",
+    //    InvocationArg::empty(),
+    //)?;
+
+    //let id: String = jvm.to_rust(id)?;
+    //println!("{}", id);
 
     session.close()?;
     connection.close()?;
