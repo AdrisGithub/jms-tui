@@ -176,13 +176,19 @@ impl<'a> Session<'a> {
         Ok(Consumer::new(self.jvm, consumer))
     }
 
-    fn close(self) -> Result<()> {
+    fn close(&mut self) -> Result<()> {
         self.jvm.invoke(
             &self.instance,
             "close",
             InvocationArg::empty(),
         )?;
         Ok(())
+    }
+}
+
+impl Drop for Session<'_> {
+    fn drop(&mut self) {
+        self.close().ok();
     }
 }
 
@@ -214,13 +220,19 @@ impl<'a> Connection<'a> {
         Ok(Session::new(self.jvm, session))
     }
 
-    fn close(self) -> Result<()> {
+    fn close(&mut self) -> Result<()> {
         self.jvm.invoke(
             &self.instance,
             "close",
             InvocationArg::empty(),
         )?;
         Ok(())
+    }
+}
+
+impl Drop for Connection<'_> {
+    fn drop(&mut self) {
+        self.close().ok();
     }
 }
 
@@ -251,7 +263,7 @@ impl<'a> ConnectionFactory<'a> {
         Ok(Connection::new(self.jvm, instance))
     }
 
-    fn close(self) -> Result<()> {
+    fn close(&mut self) -> Result<()> {
         self.jvm.invoke(
             &self.instance,
             "close",
@@ -260,6 +272,12 @@ impl<'a> ConnectionFactory<'a> {
         Ok(())
     }
 
+}
+
+impl Drop for ConnectionFactory<'_> {
+    fn drop(&mut self) {
+        self.close().ok();
+    }
 }
 
 fn main() -> Result<()> {
@@ -302,10 +320,6 @@ fn main() -> Result<()> {
     } else {
         println!("No Message Found");
     }
-
-    session.close()?;
-    connection.close()?;
-    connection_factory.close()?;
 
     Ok(())
 }
